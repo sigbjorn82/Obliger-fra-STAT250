@@ -1,0 +1,475 @@
+---
+title: "Compulsory 2"
+author: "Sigbjørn Fjelland"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+\underline{Task 1}
+
+Problem 1.1
+
+```{r}
+library(bootstrap)
+library(boot)
+library(ggplot2)
+library(data.table)
+library(Rcpp)
+library(VGAM)
+library(MASS)
+```
+
+
+```{r}
+# Presenting the data
+data <- scor
+data.open <- c("mec", "vec")
+data.closed <- c("alg", "ana", "sta")
+all.sets <- c(data.open, data.closed)
+
+#constructing groups that are to be correlated as functon for the boot package
+
+correlating.groups <- function(data, ind){
+                    mek <- data[ind, 1] 
+                    vec <- data[ind, 2] 
+                    alg <- data[ind, 3] 
+                    ana <- data[ind, 4] 
+                    sta <- data[ind, 5]
+                    
+                    
+        c(cor(mek,vec), cor(alg,ana), cor(alg, sta), cor(ana,sta))
+                                           
+                                           
+      
+}
+```
+
+
+```{r}
+boot(data = data, statistic = correlating.groups, R = 200)
+```
+\newpage
+problem 1.2
+
+```{r}
+theta.hat <- function(data, ind){
+                    mek <- data[ind, 1] 
+                    vec <- data[ind, 2] 
+                    alg <- data[ind, 3] 
+                    ana <- data[ind, 4] 
+                    sta <- data[ind, 5]
+                    
+                    data <- cbind(mek, vec, alg, ana, sta)
+                    lambda <- eigen(cov(data))$values
+                    
+                    lambda[1]/sum(lambda)
+                    }  
+                    
+                  
+```
+
+```{r}
+theta.boot <- boot(data = data, statistic = theta.hat, R=200, mle = eigen(cov(data)))
+theta.boot
+```
+
+\newpage
+problem 1.3
+
+```{r}
+print(boot.ci(theta.boot,type = "perc"))
+```
+\newpage
+
+\underline{Task 2}
+
+problem 2.1
+MH-Sampler with rayleigh distribution as proposal distribution
+```{r}
+set.seed(123)
+
+#Proposal distribution (Rayleigh)
+f <- function(x, sigma) { 
+  if (any(x < 0)) return (0)
+  stopifnot(sigma > 0)
+  return((x / sigma^2) * exp(-x^2 / (2*sigma^2)))
+}
+
+
+Nsim <- 20000 #total simulations
+burnin = 5000 #sample to burn
+sigma <- 4
+
+
+x <- numeric(Nsim)
+x[1] <- rgamma(1, rate = 1, shape = 1) # start value to simplify index in loop
+k <- 0 ## conter for rejects ##
+u <- runif(Nsim)
+
+for (i in 2:Nsim) {
+  xt <- x[i-1]
+  y <- rgamma(1, shape = xt, rate = 1)
+  num <- f(y, sigma) * dgamma(xt, rate = 1, shape = y)  #the numerator of r(xt,y) 
+  den <- f(xt, sigma) * dgamma(y, rate = 1, shape = xt) #the denominator of r(xt,y)
+  if (u[i] <= num/den) x[i] <- y else {
+    x[i] <- xt
+    k <- k+1 # Number of y being rejected
+  }
+}
+
+index<-seq(10,Nsim,by=10)  ## take index every 10 steps
+
+#sampled distribution from MH (and library for compartion)
+sampled_ray_dist <- x[burnin:Nsim]
+raylib <- rrayleigh(Nsim+1-burnin, scale = sigma)
+
+
+#quantile function
+a <- ppoints(1000)
+QR <- sigma * sqrt(-2 * log(1 - a)) 
+
+#Hists
+hist(sampled_ray_dist, breaks="scott", 
+     main="MH-sampler and QF of Raylight", xlab="x", freq=FALSE)
+lines(QR, f(QR, 4))
+hist (raylib,freq=FALSE, 
+      main = "Rayl. dist. from lib. sampler and QF.", xlab = "x")
+lines(QR, f(QR, 4))
+
+
+```
+\newpage
+
+Problem 2.2
+
+Vi Benytter normal fordelingen som symetrisk distribusjon, med 
+$\sigma = (0.05,0.5,2,16)$, og på gøy lager vi en sidekick med laplace
+
+```{r}
+
+rw.Metropolis.normal <- function(n, sigma, x0, N) {
+        x <- numeric(N)
+        x[1] <- x0
+        u <- runif(N)
+        k <- 0
+          for (i in 2:N) {
+              y <- rnorm(1, x[i-1], sigma) #rlaplace(n=1, location=x[i-1], scale = sigma) #
+                  if (u[i] <= (dt(y, n) / dt(x[i-1], n)))
+                  x[i] <- y else {
+                  x[i] <- x[i-1]
+                      k <- k + 1
+                      }
+              }
+        return(list(x=x, k=k))
+}
+
+
+
+rw.Metropolis.laplace <- function(n, sigma, x0, N) {
+        x <- numeric(N)
+        x[1] <- x0
+        u <- runif(N)
+        k <- 0
+          for (i in 2:N) {
+              y <- rlaplace(n=1, location=x[i-1], scale = sigma) #
+                  if (u[i] <= (dt(y, n) / dt(x[i-1], n)))
+                  x[i] <- y else {
+                  x[i] <- x[i-1]
+                      k <- k + 1
+                      }
+              }
+        return(list(x=x, k=k))
+}
+
+
+```
+\newpage
+Random Walk for samplet fra normal fordelingen:
+
+```{r}
+n <- 4 #degrees of freedom for target Student t dist.
+N <- 2000
+sigma <- c(.05, .5, 2, 16)
+x0 <- 25
+rw1.n <- rw.Metropolis.normal(n, sigma[1], x0, N)
+rw2.n <- rw.Metropolis.normal(n, sigma[2], x0, N)
+rw3.n <- rw.Metropolis.normal(n, sigma[3], x0, N)
+rw4.n <- rw.Metropolis.normal(n, sigma[4], x0, N)
+
+# Result from the random walks given sigma vector
+print(c(rw1.n$k, rw2.n$k, rw3.n$k, rw4.n$k))
+
+#Proportion of rejections within [0.15, 0.5]
+print(c((2000 - length(which(rw1.n$x > 0.5)) - length(which(rw1.n$x < 0.15)))/N, 
+        (2000 - length(which(rw2.n$x > 0.5)) - length(which(rw2.n$x < 0.15)))/N,
+        (2000 - length(which(rw3.n$x > 0.5)) - length(which(rw3.n$x < 0.15)))/N,
+        (2000 - length(which(rw4.n$x > 0.5)) - length(which(rw4.n$x < 0.15)))/N))
+```
+
+
+Vi ser at både $\sigma=2$ og $\sigma=16$ har en lik andelen innenfor 
+intervallet. For å få en illustrasjon på hvilke $\sigma$ som konvergerer plotter vi 
+resulktatet:
+
+
+```{r}
+
+#Plot of sigma1 and sigma2
+par(mfrow=c(1,2))
+
+plot(rw1.n$x, type = "l", main="sigma = 0.05")
+abline(h=c(0.15,0.5))
+
+plot(rw2.n$x, type = "l",main="sigma = 0.5")
+abline(h=c(0.15,0.5))
+
+
+```
+```{r}
+#Plot of sigma1 and sigma2
+par(mfrow=c(1,2))
+plot(rw3.n$x, type = "l",main="sigma = 2")
+abline(h=c(0.15,0.5))
+
+plot(rw4.n$x, type = "l",main="sigma = 16")
+abline(h=c(0.15,0.5))
+```
+
+En ser på plottet at både $\sigma=0.5$, $\sigma=2$ og $\sigma=16$ konvergerer
+innenfor intervallet, men $\sigma=0.5$ trenger en lengre periode med burning
+før den setler seg i en omegn av intervallet. $\sigma=16$ ser noe mindre 
+effektiv ut. 
+Foretrukken $\sigma$ å optimalisere rundt ville vert $\sigma=2$.
+
+
+og så til vår lille sidekick:
+```{r}
+n <- 4 #degrees of freedom for target Student t dist.
+N <- 2000
+sigma <- c(.05, .5, 2, 16)
+x0 <- 25
+rw1.l <- rw.Metropolis.laplace(n, sigma[1], x0, N)
+rw2.l <- rw.Metropolis.laplace(n, sigma[2], x0, N)
+rw3.l <- rw.Metropolis.laplace(n, sigma[3], x0, N)
+rw4.l <- rw.Metropolis.laplace(n, sigma[4], x0, N)
+
+# Result from the random walks given sigma vector
+print(c(rw1.l$k, rw2.l$k, rw3.l$k, rw4.l$k))
+
+#Proportion of rejections within [0.15, 0.5]
+print(c((2000 - length(which(rw1.l$x > 0.5)) - length(which(rw1.l$x < 0.15)))/N, 
+        (2000 - length(which(rw2.l$x > 0.5)) - length(which(rw2.l$x < 0.15)))/N,
+        (2000 - length(which(rw3.l$x > 0.5)) - length(which(rw3.l$x < 0.15)))/N,
+        (2000 - length(which(rw4.l$x > 0.5)) - length(which(rw4.l$x < 0.15)))/N))
+```
+
+For å se for hvilke $\sigma$ som konvergerer 
+```{r}
+
+#Plot of sigma1 and sigma2
+par(mfrow=c(1,2))
+
+plot(rw1.l$x, type = "l")
+abline(h=c(0.15,0.5))
+
+plot(rw2.l$x, type = "l")
+abline(h=c(0.15,0.5))
+
+
+```
+```{r}
+#Plot of sigma1 and sigma2
+par(mfrow=c(1,2))
+plot(rw3.l$x, type = "l")
+abline(h=c(0.15,0.5))
+
+plot(rw4.l$x, type = "l")
+abline(h=c(0.15,0.5))
+```
+
+
+Det må sies å være til forveksling likt i konvergens i tillegg konvergerer 
+$\sigma=0.05$ noe fortere.
+
+\newpage
+
+Problem 2.3
+
+```{r}
+set.seed(123)
+
+#initialize constants and parameters
+N <- 5000 #length of chain
+burn <- 1000 #burn-in length
+X <- matrix(0, N, 2) #the chain, a bivariate sample
+rho <- -.9 #correlation
+mu_x <- 0
+mu_y <- 0
+sigma_x <- 1
+sigma_y <- 1
+s1 <- sqrt(1-rho^2)*sigma_x
+s2 <- sqrt(1-rho^2)*sigma_y
+
+
+###### generate the chain #####
+X[1, ] <- c(mu_x, mu_y) #initialize
+for (i in 2:N) {
+x2 <- X[i-1, 2]
+m_x <- mu_x + rho * (y - mu_y) * sigma_x/sigma_y
+X[i, 1] <- rnorm(1, m_x, s1)
+x_x <- X[i, 1]
+m_y <- mu_y + rho * (x_x - mu_x) * sigma_y/sigma_x
+X[i, 2] <- rnorm(1, m_y, s2)
+}
+b <- burn + 1
+x <- X[b:N, ]
+
+hist(sampled_ray_dist, breaks="scott", 
+     main="Gibbs Sampler for N(0,1)", xlab="x", freq=FALSE)
+
+```
+
+
+\newpage
+
+
+Task 3
+
+problem 3.1
+
+```{r}
+p1 <- 0.5
+n = 10
+data <- p1 *rnorm(n, 1,1) + (1-p1) * rnorm(n, 3,1)
+data1 <- p1 *rgamma(n, rate = 1, shape = 1) + (1-p1) * rgamma(n, rate = 3, shape = 1)
+par(mfrow = c(1, 1))
+print(density(data))
+
+df <- approxfun(density(data))   ##extract the density function##
+xnew <- seq(0,10,0.2)
+n <- length(data)
+h1 <- 0.9 * min(c(IQR(data)/1.34, sd(data))) * n^(-1/5) #density seems not unimodal#
+h2 <- 1.06 * sd(data) * n^(-1/5)
+```
+lets first look at the extream example (high, low):
+
+```{r}
+par(mfrow = c(2, 2))
+plot(density(data,bw=.10) , main="extream narrow bw - gaus distr") # "Day of the tentacle"
+plot(density(data,bw=1000), main="extream wide bw - gaus distr")  #Glææt - "too much
+plot(density(data1,bw=.10), main="extream narrow bw - gamma distr") # "Day of the tentacle"
+plot(density(data1,bw=1000), main="extream narrow bw - gamma distr")  #Glææt - "too much
+```
+From this we can conclude that choise of bandwith is essential. To narrow 
+you get spikes, to wide you obtain a verry flat, smooth curve converged towards 
+the normal distribution. As we also see the result is the same if we change the
+kernel distribution. So lets try to fit a better curve:
+
+```{r}
+#par(mfrow=c(2,2)) 
+plot(density(data)) #The default method applies the Gaussian kernel#3
+points(xnew,df(xnew),col=2)  #bulky
+plot(density(data,bw=h1)) #Better, this include the duality of the two distr.
+plot(density(data,bw=h2)) #oversmooth...
+```
+
+
+\newpage
+problem 3.2
+
+
+we have:
+\begin{align*}
+\textbf{x}=&\{x_1,...,x_n\}\sim gamma(\theta)\\
+\theta=&(r,\lambda)
+\end{align*}
+
+we first need to solve for the MLE functions for the gamma distributed RVs:
+
+\begin{align*}
+f(\textbf{x}|\theta) = & \frac{\lambda^{r}}{\Gamma(r)}\cdot \textbf{x}^{r-1}\cdot exp(-\lambda\textbf{x}) \\
+L(\theta|x_1,...,x_n) = &\prod^n_{i=1}f(\textbf{x}|\theta) \\
+= & \frac{\lambda^{n\cdot r}}{\Gamma(r)^n}\cdot\sum^n_i x_i^{r-1}\cdot exp(-\lambda \sum^n_i x_i)
+\end{align*}
+we obtain the log likeliehood by applying magic
+\begin{align*}
+l(\theta|x_1,...,x_n) = & nr\cdot log(\lambda) - n\cdot log(\Gamma(r)) + (r-1)\cdot \sum^n_i log(x_i) - \lambda \sum^n_i x_i
+\end{align*}
+
+we then take the derivative to find the maximum:
+\begin{align*}
+\frac{\partial l}{\partial \lambda} = & \frac{nr}{\lambda}-\sum^n_{i=1}x_i =0\\
+\frac{\partial l}{\partial r} = & n\cdot log(\lambda)-\frac{n\Gamma'(r)}{\Gamma(r)}+\sum^n_{i=1}log(x_i)=0
+\end{align*}
+\newpage
+to find $\hat{\lambda}$ is fairly straight forward:
+\begin{align*}
+    \frac{nr}{\lambda} & -\sum^n_{i=1}x_i =0 \\
+    \frac{nr}{\lambda} & =\sum^n_{i=1}x_i \\
+    \hat{\lambda} & =\frac{nr}{\sum^n_{i=1}x_i}=\frac{r}{n^{-1}\sum^n_{i=1}x_i}=\frac{\hat{r}}{\bar{x_n}}  
+\end{align*}
+to find $\hat{r}$ is more of a pain since we have the $\frac{\Gamma'(r)}{\Gamma(r)}$ 
+term also known as digamma:
+\begin{align*}
+\psi(r)=\frac{\Gamma'(r)}{\Gamma(r)} = & \frac{\partial}{\partial r}log(\Gamma(r))
+\end{align*}
+
+to simplify we substitute $\hat{\lambda}$ into the equation:
+
+\begin{align}
+n\cdot log(\frac{\hat{r}}{\bar{x_n}})-\frac{n\Gamma'(\hat{r})}{\Gamma(\hat{r})}+\sum^n_{i=1}log(x_i)=0 \\
+log(\frac{\hat{r}}{\bar{x_n}})-\frac{1}{n}\sum^n_{i=1}log(x_i)=\frac{\Gamma'(\hat{r})}{\Gamma(\hat{r})}=\psi(\lambda\bar{x_n})
+\end{align}
+
+for $\bar{x_n}=\frac{r}{\lambda}$
+
+\newpage
+Due to the digamma function the MLE needs to be solved numericaly by 
+root solver (in r uniroots), which is presumably a bisection method, since
+derivative is not needed. Bisection only need a continous function to converge
+to one of the existing roots.
+Bellow the same simulation asfrom "Statistical computing with R by 
+Maria L. Rizzo" page 340 is conducted (with comments on the process)
+
+
+```{r}
+
+m <- 20000 
+est <- matrix(0, m, 2)
+n <- 200
+r <- 5
+lambda <- 2
+
+# equation (1) above, of which we want to find the root
+obj <- function(lambda, xbar, logx.bar) {
+    digamma(lambda * xbar) - logx.bar - log(lambda)
+    }
+
+#Do m simulations of a set of x_1,...,x_n
+for (i in 1:m) {
+    x <- rgamma(n, shape=r, rate=lambda)
+    xbar <- mean(x)
+    
+    # using uniroot to solve numericaly
+    u <- uniroot(obj, lower = .001, upper = 10e5,
+        xbar = xbar, logx.bar = mean(log(x)))
+    
+  #columns vector of MLE simulations  
+  lambda.hat <- u$root
+  r.hat <- xbar * lambda.hat
+  est[i, ] <- c(r.hat, lambda.hat)
+}
+
+#mean of the MLE simulations
+
+ML <- colMeans(est)
+
+ML
+
+```
+
